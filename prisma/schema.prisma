@@ -1,0 +1,320 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ============================================
+// ENUMS
+// ============================================
+
+enum UserRole {
+  CUSTOMER
+  ADMIN1
+  ADMIN2
+  ADMIN3
+  SUPERADMIN
+}
+
+enum BookingStatus {
+  PENDING
+  CHANGE_REQUESTED
+  APPROVED
+  REJECTED
+  PAYMENT_REQUESTED
+  PAYMENT_COMPLETED
+  CONFIRMED
+}
+
+enum AdminApprovalLevel {
+  LEVEL_1 // Admin1 - Initial verification
+  LEVEL_2 // Admin2 - Availability & Payment
+  LEVEL_3 // Admin3 - Final approval
+}
+
+enum EventType {
+  WEDDING
+  CORPORATE_EVENT
+  BIRTHDAY
+  ANNIVERSARY
+  CONFERENCE
+  CONCERT
+  OTHER
+}
+
+enum PaymentStatus {
+  PENDING
+  INITIATED
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+enum AuditAction {
+  BOOKING_CREATED
+  BOOKING_UPDATED
+  CHANGE_REQUESTED
+  APPROVED
+  REJECTED
+  PAYMENT_REQUESTED
+  PAYMENT_VERIFIED
+  DOCUMENT_VERIFIED
+  MOVED_TO_NEXT_LEVEL
+}
+
+// ============================================
+// USERS
+// ============================================
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  username     String   @unique
+  firstName    String?
+  lastName     String?
+  phone        String?
+  address      String?
+  city         String?
+  state        String?
+  pinCode      String?
+  role         UserRole @default(CUSTOMER)
+
+  // For admins
+  createdByAdminId String?
+  createdByAdmin   User?   @relation("AdminCreatedBy", fields: [createdByAdminId], references: [id])
+  createdAdmins    User[]  @relation("AdminCreatedBy")
+
+  // Relations
+  bookings       Booking[]
+  payments       Payment[]
+  auditLogs      AuditLog[]
+  adminApprovals AdminApproval[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ============================================
+// BANQUET HALLS
+// ============================================
+
+model BanquetHall {
+  id          String  @id @default(cuid())
+  name        String
+  description String?
+  capacity    Int
+  basePrice   Float
+
+  // Location
+  address     String
+  city        String
+  state       String
+  pinCode     String
+  coordinates Json? // { latitude, longitude }
+
+  // Amenities
+  amenities String[] // ["parking", "ac", "stage", "catering", "wifi"]
+
+  // Images & media
+  imageUrls     String[]
+  panoramicView String? // URL to 360-degree view
+
+  // Operational details
+  availability HallAvailability[]
+  bookings     BookingHall[]
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model HallAvailability {
+  id          String      @id @default(cuid())
+  hallId      String
+  hall        BanquetHall @relation(fields: [hallId], references: [id], onDelete: Cascade)
+  date        DateTime
+  startTime   DateTime
+  endTime     DateTime
+  isAvailable Boolean     @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([hallId, date, startTime])
+}
+
+// ============================================
+// BOOKINGS
+// ============================================
+
+model Booking {
+  id         String @id @default(cuid())
+  customerId String
+  customer   User   @relation(fields: [customerId], references: [id])
+
+  // Event details
+  eventType  EventType
+  eventDate  DateTime
+  startTime  DateTime
+  endTime    DateTime
+  guestCount Int
+
+  // Booking status workflow
+  status BookingStatus @default(PENDING)
+
+  // Admin approvals (multi-level)
+  admin1Approval   AdminApproval? @relation("Admin1Booking", fields: [admin1ApprovalId], references: [id])
+  admin1ApprovalId String?
+  admin2Approval   AdminApproval? @relation("Admin2Booking", fields: [admin2ApprovalId], references: [id])
+  admin2ApprovalId String?
+  admin3Approval   AdminApproval? @relation("Admin3Booking", fields: [admin3ApprovalId], references: [id])
+  admin3ApprovalId String?
+
+  // Selected halls
+  hallBookings BookingHall[]
+
+  // Payment
+  payment Payment?
+
+  // Documents
+  documents Document[]
+
+  // Audit trail
+  auditLogs AuditLog[]
+
+  // Change tracking
+  changeRequests ChangeRequest[]
+
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model BookingHall {
+  id        String      @id @default(cuid())
+  bookingId String
+  booking   Booking     @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  hallId    String
+  hall      BanquetHall @relation(fields: [hallId], references: [id])
+
+  allocatedPrice Float
+
+  createdAt DateTime @default(now())
+
+  @@unique([bookingId, hallId])
+}
+
+// ============================================
+// ADMIN APPROVALS (Multi-Level Workflow)
+// ============================================
+
+model AdminApproval {
+  id String @id @default(cuid())
+
+  admin1Bookings Booking[] @relation("Admin1Booking")
+  admin2Bookings Booking[] @relation("Admin2Booking")
+  admin3Bookings Booking[] @relation("Admin3Booking")
+
+  level   AdminApprovalLevel
+  adminId String
+  admin   User               @relation(fields: [adminId], references: [id])
+
+  status              BookingStatus
+  comments            String?
+  documentsVerified   Boolean       @default(false)
+  paymentVerified     Boolean       @default(false)
+  availabilityChecked Boolean       @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ChangeRequest {
+  id        String  @id @default(cuid())
+  bookingId String
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  reason           String
+  requestedChanges Json // Flexible structure for various change types
+  status           String @default("PENDING") // PENDING, APPROVED, REJECTED
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ============================================
+// PAYMENTS
+// ============================================
+
+model Payment {
+  id        String  @id @default(cuid())
+  bookingId String  @unique
+  booking   Booking @relation(fields: [bookingId], references: [id])
+
+  customerId String
+  customer   User   @relation(fields: [customerId], references: [id])
+
+  amount        Float
+  status        PaymentStatus @default(PENDING)
+  paymentMethod String? // "RAZORPAY", "STRIPE", "BANK_TRANSFER"
+
+  // Payment gateway references
+  transactionId    String?
+  paymentGatewayId String? // Razorpay order ID or Stripe intent ID
+
+  invoiceNumber String? @unique
+  invoiceUrl    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ============================================
+// DOCUMENTS
+// ============================================
+
+model Document {
+  id        String  @id @default(cuid())
+  bookingId String
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  documentType      String // "ID_PROOF", "ADDRESS_PROOF", "EVENT_DETAILS", etc.
+  fileUrl           String
+  fileName          String
+  uploadedBy        String // User ID
+  isVerified        Boolean @default(false)
+  verificationNotes String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ============================================
+// AUDIT LOGS
+// ============================================
+
+model AuditLog {
+  id String @id @default(cuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  bookingId String?
+  booking   Booking?    @relation(fields: [bookingId], references: [id])
+  action    AuditAction
+
+  description   String
+  changedFields Json? // Track what changed
+
+  ipAddress String?
+  userAgent String?
+
+  createdAt DateTime @default(now())
+}
