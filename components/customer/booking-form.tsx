@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -28,6 +29,25 @@ export function BookingForm({ hallId }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [isAuth, setIsAuth] = useState<boolean | null>(null);
+  const router = useRouter();
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const res = await fetch("/api/auth/status");
+        if (!mounted) return;
+        if (res.ok) setIsAuth(true);
+        else setIsAuth(false);
+      } catch {
+        if (mounted) setIsAuth(false);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -36,6 +56,20 @@ export function BookingForm({ hallId }: Props) {
     setSuccess(null);
 
     try {
+      // client-side validation
+      if (!eventDate) throw new Error("Please select an event date");
+      if (!startTime || !endTime) throw new Error("Please select start and end times");
+      if (guestCount <= 0) throw new Error("Guest count must be greater than zero");
+      const start = new Date(`${eventDate}T${startTime}`);
+      const end = new Date(`${eventDate}T${endTime}`);
+      if (isNaN(+start) || isNaN(+end)) throw new Error("Invalid date or time");
+      if (start >= end) throw new Error("Start time must be before end time");
+
+      if (isAuth === false) {
+        // redirect to login preserving return url
+        router.push(`/auth/login?next=/customer/halls/${hallId}`);
+        return;
+      }
       const res = await fetch("/api/bookings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -53,8 +87,8 @@ export function BookingForm({ hallId }: Props) {
         if (!res.ok) throw new Error(data?.error || "Failed to create booking");
 
         setSuccess("Booking created — pending approval.");
-        // Redirect to booking details/confirmation page
-        setTimeout(() => (window.location.href = `/customer/bookings/${data.id}`), 900);
+        // Use Next router for navigation
+        setTimeout(() => router.push(`/customer/bookings/${data.id}`), 900);
     } catch (err: any) {
       setError(err.message || "Booking failed");
     } finally {

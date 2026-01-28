@@ -23,22 +23,50 @@ export async function POST(request: NextRequest) {
       hallIds,
     } = body;
 
-    // Validation
+    // Basic validation
     if (!eventType || !eventDate || !startTime || !endTime || !guestCount || !hallIds?.length) {
-      return NextResponse.json(
-        { error: "Missing required fields" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+    }
+
+    // Parse eventDate
+    const parsedEventDate = new Date(eventDate);
+    if (isNaN(+parsedEventDate)) {
+      return NextResponse.json({ error: "Invalid eventDate" }, { status: 400 });
+    }
+
+    // Helper to build datetime: if time contains 'T' or full ISO, use it; otherwise combine date + time
+    const buildDateTime = (dateOnly: string | Date, timeOrIso: string) => {
+      // If client sent an ISO datetime, rely on it
+      if (typeof timeOrIso === "string" && timeOrIso.includes("T")) {
+        const dt = new Date(timeOrIso);
+        return isNaN(+dt) ? null : dt;
+      }
+
+      const dateStr = typeof dateOnly === "string" ? dateOnly : dateOnly.toISOString().split("T")[0];
+      const combined = `${dateStr}T${timeOrIso}`;
+      const dt = new Date(combined);
+      return isNaN(+dt) ? null : dt;
+    };
+
+    const parsedStart = buildDateTime(eventDate, startTime);
+    const parsedEnd = buildDateTime(eventDate, endTime);
+
+    if (!parsedStart || !parsedEnd) {
+      return NextResponse.json({ error: "Invalid startTime or endTime" }, { status: 400 });
+    }
+
+    if (parsedStart >= parsedEnd) {
+      return NextResponse.json({ error: "startTime must be before endTime" }, { status: 400 });
     }
 
     // Create booking
     const booking = await createBooking({
       customerId: session.userId,
       eventType,
-      eventDate: new Date(eventDate),
-      startTime: new Date(startTime),
-      endTime: new Date(endTime),
-      guestCount: parseInt(guestCount),
+      eventDate: parsedEventDate,
+      startTime: parsedStart,
+      endTime: parsedEnd,
+      guestCount: parseInt(String(guestCount), 10),
       hallIds,
     });
 
